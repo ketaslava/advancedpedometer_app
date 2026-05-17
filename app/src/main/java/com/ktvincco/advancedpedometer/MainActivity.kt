@@ -198,7 +198,9 @@ fun MainScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     // Today Card
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onDayClick(today) },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -210,7 +212,9 @@ fun MainScreen(
                     
                     // Yesterday Card
                     Card(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onDayClick(yesterday) }
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Yesterday", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
