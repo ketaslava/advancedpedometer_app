@@ -87,7 +87,7 @@ fun PedometerMap(
                     val myLoc = locationOverlay.myLocation
                     if (myLoc != null) {
                         post {
-                            controller.animateTo(myLoc)
+                            controller.setCenter(myLoc)
                         }
                     }
                 }
