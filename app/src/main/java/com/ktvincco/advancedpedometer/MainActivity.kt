@@ -14,6 +14,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +32,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,8 +49,10 @@ import com.ktvincco.advancedpedometer.data.PathPoint
 import com.ktvincco.advancedpedometer.ui.PedometerMap
 import com.ktvincco.advancedpedometer.ui.PedometerViewModel
 import com.ktvincco.advancedpedometer.ui.theme.AdvancedPedometerTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -175,10 +182,24 @@ fun MainScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .combinedClickable(
-                                    onClick = { onSettingsClick() },
-                                    onLongClick = { onEditorOpen() }
-                                ),
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        awaitFirstDown()
+                                        var upEvent: PointerInputChange? = null
+                                        val result = withTimeoutOrNull(3000) {
+                                            upEvent = waitForUpOrCancellation()
+                                        }
+
+                                        if (result == null) {
+                                            // Held for X seconds
+                                            onEditorOpen()
+                                            waitForUpOrCancellation()
+                                        } else if (upEvent != null) {
+                                            // Released before X seconds
+                                            onSettingsClick()
+                                        }
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text("Settings", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge)
@@ -267,7 +288,9 @@ fun MainScreen(
 
                 groupedByMonth.forEach { (month, monthCycles) ->
                     item { 
-                        val monthName = SimpleDateFormat("MMMM", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.MONTH, month) }.time)
+                        val monthName = remember(month) {
+                            SimpleDateFormat("MMMM", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.MONTH, month) }.time)
+                        }
                         val monthSteps = monthCycles.sumOf { it.totalSteps }
                         val monthDist = monthCycles.sumOf { it.totalDistance }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -343,6 +366,9 @@ fun MonthInsert(text: String, subtext: String) {
 
 @Composable
 fun DayBlockButton(date: Date, steps: Int, distance: Double, isImperial: Boolean, onClick: () -> Unit) {
+    val dateText = remember(date) {
+        SimpleDateFormat("dd MMMM", Locale.getDefault()).format(date)
+    }
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() }
     ) {
@@ -352,7 +378,7 @@ fun DayBlockButton(date: Date, steps: Int, distance: Double, isImperial: Boolean
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = SimpleDateFormat("dd MMMM", Locale.getDefault()).format(date),
+                text = dateText,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium
             )
@@ -408,8 +434,11 @@ fun DayDetailScreen(viewModel: PedometerViewModel, dateMillis: Long, onBack: () 
             )
         }
     ) { innerPadding ->
+        val dateText = remember(dateMillis) {
+            SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date(dateMillis))
+        }
         Column(modifier = Modifier.padding(innerPadding).padding(16.dp).fillMaxSize()) {
-            Text(SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date(dateMillis)), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(dateText, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StatBox("Steps", "$totalSteps")
@@ -441,7 +470,8 @@ fun EditorScreen(viewModel: PedometerViewModel, onBack: () -> Unit) {
     var editingCycle by remember { mutableStateOf<MeasurementCycle?>(null) }
     var cycleToDelete by remember { mutableStateOf<MeasurementCycle?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
-    var newRecordDate by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())) }
+    val initialDate = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()) }
+    var newRecordDate by remember { mutableStateOf(initialDate) }
     
     val points by if (editingCycle != null) viewModel.getPointsForCycle(editingCycle!!.id).collectAsState(initial = emptyList()) else remember { mutableStateOf(emptyList()) }
 
@@ -498,7 +528,22 @@ fun EditorScreen(viewModel: PedometerViewModel, onBack: () -> Unit) {
         )
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Data Editor") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "") } }) }) { innerPadding ->
+    Scaffold(topBar = { 
+        TopAppBar(
+            title = { Text("Data Editor") }, 
+            navigationIcon = { 
+                IconButton(onClick = { 
+                    if (editingCycle != null) {
+                        editingCycle = null
+                    } else {
+                        onBack()
+                    }
+                }) { 
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "") 
+                } 
+            }
+        ) 
+    }) { innerPadding ->
         if (editingCycle == null) {
             LazyColumn(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
                 item { 
@@ -527,15 +572,20 @@ fun EditorScreen(viewModel: PedometerViewModel, onBack: () -> Unit) {
 
                     groupedByMonth.forEach { (month, monthCycles) ->
                         item { 
-                            val monthName = SimpleDateFormat("MMMM", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.MONTH, month) }.time)
+                            val monthName = remember(month, year) {
+                                SimpleDateFormat("MMMM", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.MONTH, month) }.time)
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
                             MonthInsert(text = "$monthName $year", subtext = "${monthCycles.size} records") 
                         }
 
                         items(monthCycles) { cycle ->
+                            val cycleDateText = remember(cycle.startTime) {
+                                SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(cycle.startTime))
+                            }
                             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date(cycle.startTime)), fontWeight = FontWeight.Bold)
+                                    Text(cycleDateText, fontWeight = FontWeight.Bold)
                                     Text("${cycle.totalSteps} steps | ${formatDistance(cycle.totalDistance, isImperial)}", style = MaterialTheme.typography.bodySmall)
                                 }
                                 IconButton(onClick = { editingCycle = cycle }) { Icon(Icons.Default.Edit, "") }
@@ -554,7 +604,10 @@ fun EditorScreen(viewModel: PedometerViewModel, onBack: () -> Unit) {
                 Text("Edit Record", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                var dateString by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(editingCycle!!.startTime))) }
+                val initialEditDate = remember(editingCycle!!.id) {
+                    SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(editingCycle!!.startTime))
+                }
+                var dateString by remember(editingCycle!!.id) { mutableStateOf(initialEditDate) }
                 
                 OutlinedTextField(
                     value = dateString,
